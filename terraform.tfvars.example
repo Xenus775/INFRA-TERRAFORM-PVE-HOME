@@ -1,0 +1,10 @@
+# Copiez ce fichier en terraform.tfvars (jamais commite, voir .gitignore) et completez les valeurs reelles.
+
+proxmox_endpoint         = "https://192.168.10.160:8006/"
+proxmox_api_token_id     = "terraform_provisioner@pve!provisioner"
+proxmox_api_token_secret = "REPLACE_ME"
+
+proxmox_node = "PVE-INFRA-MATT-01"
+
+# Cle publique du keypair dedie injecte via Cloud-Init (ne jamais mettre la cle privee ici)
+ssh_public_key = "ssh-ed25519 AAAA... commentaire"

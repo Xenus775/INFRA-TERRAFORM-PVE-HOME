@@ -1,0 +1,25 @@
+# State Terraform (contient des secrets et le detail de l'infra)
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfstate.backup
+
+# Variables reelles (contiennent des secrets)
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plans Terraform sauvegardes (peuvent contenir des valeurs sensibles)
+tfplan
+*.tfplan
+
+# Divers
+crash.log
+crash.*.log
+*.pem
+*.key
+.env
+.DS_Store

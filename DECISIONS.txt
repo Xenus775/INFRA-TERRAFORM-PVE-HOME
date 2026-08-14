@@ -1,0 +1,389 @@
+==================================================
+DECISION : Choix du provider Terraform Proxmox
+==================================================
+
+CONTEXTE
+--------
+
+Deux providers Terraform pour Proxmox VE sont couramment utilises : bpg/proxmox
+et Telmate/proxmox. Il fallait en choisir un pour l'ensemble du depot, sachant
+que l'environnement cible tourne en Proxmox VE 9.2.10 (version recente, sortie
+courant 2025).
+
+OPTIONS
+-------
+
+Option A : bpg/proxmox
+  Provider maintenu activement (releases frequentes), suit de pres les nouvelles
+  versions de Proxmox VE (dont le content-type "import" introduit en PVE 8.1 pour
+  importer des images disque directement via l'API). Gestion Cloud-Init complete
+  (user_account, ip_config, dns) au travers d'un bloc "initialization" dedie.
+  Documentation Terraform Registry a jour.
+
+Option B : Telmate/proxmox
+  Provider historique, tres utilise dans la communaute, mais maintenance
+  longtemps irreguliere (longues periodes sans release, prise en charge tardive
+  des nouvelles versions de PVE). Gestion Cloud-Init moins propre (melange
+  d'attributs qm-style peu types).
+
+Option C : Utiliser l'API Proxmox directement (scripts, sans provider Terraform dedie)
+  Rejete d'emblee : va a l'encontre de l'objectif d'un etat declaratif et d'un
+  plan/apply lisibles.
+
+DECISION
+--------
+
+bpg/proxmox (source: bpg/proxmox, version ~> 0.66 au moment de la redaction).
+
+RAISON
+------
+
+- Maintenance active et suivi des versions recentes de PVE (important ici,
+  l'environnement tourne en PVE 9.2.10).
+- Support natif du content-type "import" pour telecharger une image cloud
+  qcow2 directement dans un storage Proxmox via l'API, sans necessiter d'acces
+  SSH root a l'hote Proxmox pour bootstrap le template.
+- Modelisation Cloud-Init structuree (bloc initialization), plus lisible et
+  plus proche du schema reel de Proxmox que l'approche Telmate.
+
+IMPACT
+------
+
+Positif : moins de dependance a un acces SSH root sur l'hote Proxmox ; meilleure
+compatibilite future avec les versions de PVE a venir.
+Negatif : provider plus jeune que Telmate, la surface d'API peut encore evoluer
+(breaking changes possibles entre versions mineures) -> la version est epinglee
+(~> 0.66) et .terraform.lock.hcl est committe pour figer les versions exactes.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Telmate/proxmox a ete ecarte a cause de sa maintenance historiquement irreguliere
+et de sa gestion Cloud-Init moins propre, alors meme que Cloud-Init est central
+dans l'architecture cible de ce depot.
+
+
+==================================================
+DECISION : Strategie de template Cloud-Init
+==================================================
+
+CONTEXTE
+--------
+
+Aucun template VM Cloud-Init n'existait sur l'environnement Proxmox audite
+(seuls des ISO d'installation classiques et deux templates LXC etaient
+presents). Il fallait choisir comment construire ce template : manuellement
+via SSH sur l'hote, ou entierement via Terraform.
+
+OPTIONS
+-------
+
+Option A : Construction manuelle via SSH root sur l'hote Proxmox
+  (wget de l'image cloud, qm importdisk, qm template). Rapide a executer une
+  fois, mais constitue une manipulation manuelle non documentee dans le code,
+  et necessite un acces SSH root que l'on cherche justement a eviter pour
+  Terraform.
+
+Option B : Construction du template via Terraform (resource
+  proxmox_virtual_environment_download_file + proxmox_virtual_environment_vm
+  avec template = true)
+  Entierement reproductible depuis "terraform apply", aucun acces SSH root
+  necessaire, le template devient une ressource versionnee au meme titre que
+  les VM qui en decoulent.
+
+DECISION
+--------
+
+Option B : le template est un module Terraform (modules/template) execute au
+sein du meme plan que les VM.
+
+RAISON
+------
+
+Coherent avec l'exigence de ne jamais dependre de manipulations manuelles non
+documentees. Le token API "provisioner" dedie a explicitement les droits
+Datastore.AllocateSpace / Datastore.AllocateTemplate necessaires sur les
+storages local et local-lvm, rendant cette approche possible sans acces SSH
+root a l'hote.
+
+IMPACT
+------
+
+Positif : reproductibilite totale, aucun secret SSH root necessaire pour
+Terraform.
+Negatif : le premier apply est plus long (telechargement de l'image cloud
+depuis internet a chaque recreation du template si celui-ci est detruit).
+
+ALTERNATIVES REJETEES
+---------------------
+
+La construction manuelle (Option A) a ete ecartee : elle aurait cree une
+dependance cachee non versionnee (le template existerait sur Proxmox sans
+que son origine soit tracee dans le code).
+
+
+==================================================
+DECISION : Distribution de base des VM
+==================================================
+
+CONTEXTE
+--------
+
+Il fallait choisir une distribution Linux stable pour le template Cloud-Init.
+
+OPTIONS
+-------
+
+Option A : Debian (image cloud "generic", derniere version stable, Debian 13
+"trixie" au moment de la redaction).
+Option B : Ubuntu Server (image cloud LTS).
+
+DECISION
+--------
+
+Debian 13 (trixie), image cloud "generic" officielle
+(cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2).
+
+RAISON
+------
+
+Coherence avec l'environnement Proxmox existant : les templates LXC deja
+presents sont en Debian 13, et l'ISO d'installation presente sur le noeud est
+egalement Debian 13. Eviter d'introduire une deuxieme famille de distribution
+sans raison.
+
+IMPACT
+------
+
+Positif : coherence de l'ensemble du parc, une seule base de paquets/versions
+a suivre pour les mises a jour de securite.
+Negatif : aucun notable dans ce contexte.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Ubuntu Server LTS aurait ete un choix tout aussi valable, mais n'apportait
+aucun avantage par rapport a Debian dans cet environnement deja oriente
+Debian.
+
+
+==================================================
+DECISION : Strategie de state Terraform
+==================================================
+
+CONTEXTE
+--------
+
+Il fallait decider entre un state local et un backend distant (S3-compatible,
+stockage sur Proxmox, etc.).
+
+OPTIONS
+-------
+
+Option A : State local (fichier terraform.tfstate sur le poste de travail,
+jamais commite).
+Option B : Backend distant (ex: stockage S3-compatible, ou un serveur dedie).
+
+DECISION
+--------
+
+State local pour l'instant.
+
+RAISON
+------
+
+Contexte mono-utilisateur (un seul operateur, un seul poste de travail), pas
+de besoin de verrouillage concurrent ni de collaboration multi-machine. Un
+backend distant ajouterait de la complexite operationnelle (un service
+supplementaire a maintenir et securiser) sans benefice reel ici.
+
+IMPACT
+------
+
+Positif : simplicite, aucune dependance externe.
+Negatif : le state n'est present que sur ce poste de travail -> a sauvegarder
+manuellement (copie hors-ligne) pour eviter une perte totale en cas de
+defaillance disque. Point a revisiter si un jour plusieurs machines ou
+plusieurs personnes doivent executer Terraform sur cette infrastructure.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Un backend distant a ete juge premature pour un usage personnel mono-poste ;
+sera reconsidere si le besoin de collaboration apparait.
+
+
+==================================================
+DECISION : Organisation des modules et absence de dossier environments/
+==================================================
+
+CONTEXTE
+--------
+
+La structure de reference proposee incluait un dossier environments/home/.
+Avec un seul site Proxmox et un seul "environnement" reel (l'infra
+personnelle), ce niveau d'indirection n'apportait rien.
+
+DECISION
+--------
+
+Structure simplifiee : configuration racine directe (main.tf, variables.tf,
+outputs.tf) + deux modules reutilisables (modules/template, modules/vm). Pas
+de dossier environments/.
+
+RAISON
+------
+
+Eviter la complexite inutile pour un seul environnement reel. Le dossier
+environments/ pourra etre introduit plus tard si un second site ou une
+distinction claire (ex: home vs lab de test) devient necessaire.
+
+IMPACT
+------
+
+Positif : lisibilite immediate, moins de fichiers a traverser pour comprendre
+l'infrastructure.
+Negatif : si un second environnement Proxmox apparait un jour, une
+restructuration sera necessaire.
+
+ALTERNATIVES REJETEES
+---------------------
+
+La structure complete avec environments/home/ a ete ecartee comme etant de la
+sur-ingenierie pour l'usage actuel (un seul site, un seul operateur).
+
+
+==================================================
+DECISION : Convention VMID et pool Proxmox dedie
+==================================================
+
+CONTEXTE
+--------
+
+L'environnement Proxmox contient deja des VM/CT crees manuellement (VMID 100,
+102 a 106). Il fallait eviter toute collision et distinguer clairement ce qui
+est gere par Terraform.
+
+DECISION
+--------
+
+- Plage VMID 200-299 reservee aux VM creees par Terraform.
+- VMID 9000 reserve au template Cloud-Init.
+- Toutes les VM gerees par Terraform sont rattachees au pool Proxmox dedie
+  "IAC" (cree manuellement avant le premier apply).
+
+RAISON
+------
+
+Isolation visuelle (dans l'UI Proxmox) et fonctionnelle (permissions API
+scopees sur /pool/IAC) entre les ressources gerees par l'IaC et celles gerees
+manuellement (adguard, Openvpn, nginxproxymanager, wizarr, etc.), qui ne
+doivent jamais etre touchees par Terraform.
+
+IMPACT
+------
+
+Positif : le token API "provisioner" ne peut agir que sur le pool IAC et les
+storages local/local-lvm, jamais sur les VM existantes.
+Negatif : aucun.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Ne pas utiliser de pool dedie a ete ecarte : cela aurait force a donner au
+token de provisioning des droits sur "/" (l'ensemble du cluster) pour pouvoir
+creer des VM, ce qui aurait ete disproportionne (le token aurait alors pu
+potentiellement modifier les VM existantes).
+
+
+==================================================
+DECISION : Adressage IP des VM
+==================================================
+
+CONTEXTE
+--------
+
+Le reseau Proxmox est plat (un seul bridge vmbr0, pas de VLAN), sur
+192.168.10.0/24. Il fallait decider du mode d'adressage des VM creees par
+Terraform.
+
+DECISION
+--------
+
+- VM d'administration (ex: control-node Ansible) : IP statique, dans la plage
+  reservee 192.168.10.120-192.168.10.130.
+- VM de service futures : DHCP par defaut.
+
+RAISON
+------
+
+Decision du proprietaire de l'infrastructure. Les VM d'administration doivent
+etre joignables a une adresse previsible (SSH, inventaire Ansible) ; les VM de
+service peuvent pour l'instant s'appuyer sur le DHCP existant.
+
+IMPACT
+------
+
+Positif : simplicite pour les VM de service (pas de gestion de plage
+d'adresses statiques a maintenir cote Terraform).
+Negatif : sans reservation DHCP correspondante cote routeur, l'IP d'une VM de
+service peut changer entre deux redemarrages -> a surveiller si des services
+critiques sont deployes ainsi. L'agent QEMU (bloc "agent { enabled = true }")
+est active sur toutes les VM pour permettre de retrouver l'IP effective via
+les outputs Terraform (ipv4_addresses) meme en DHCP.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Aucune, ce point reste ouvert a revision si le nombre de VM de service
+augmente (passage a un plan d'adressage statique complet ou a des reservations
+DHCP systematiques).
+
+
+==================================================
+DECISION : Gestion des secrets
+==================================================
+
+CONTEXTE
+--------
+
+Le token API Proxmox et la cle SSH ne doivent jamais se retrouver dans Git.
+
+DECISION
+--------
+
+- terraform.tfvars (valeurs reelles) : present uniquement en local, exclu par
+  .gitignore. Seul terraform.tfvars.example (valeurs factices) est commite.
+- Deux tokens API Proxmox distincts et a permissions minimales :
+  - terraform_auditor@pve!auditor : role PVEAuditor (lecture seule) sur "/",
+    utilise uniquement pour l'audit initial.
+  - terraform_provisioner@pve!provisioner : role PVEAdmin sur /pool/IAC +
+    PVEDatastoreAdmin sur /storage/local et /storage/local-lvm, utilise par
+    Terraform pour le provisioning.
+- Cle SSH dediee (id_ed25519_pve_admin) generee specifiquement pour l'acces
+  Cloud-Init aux VM, distincte de toute cle personnelle preexistante.
+
+RAISON
+------
+
+Principe de moindre privilege : aucun des deux tokens Proxmox n'a de droits
+sur "/" avec un role d'administration complete (le token provisioner est
+scope au pool IAC et a deux storages precis, jamais sur les VM/CT existants).
+
+IMPACT
+------
+
+Positif : meme en cas de fuite du token provisioner, l'impact est borne au
+pool IAC et aux deux storages concernes.
+Negatif : le role effectivement attribue au token provisioner sur /pool/IAC
+est "PVEAdmin" (plus large que le "PVEVMAdmin" initialement recommande) -
+cela reste correctement scope au pool IAC uniquement donc sans impact sur le
+reste de l'infrastructure, mais pourra etre resserre a PVEVMAdmin si
+souhaite.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Un secrets manager externe (Vault, etc.) a ete ecarte comme disproportionne
+pour un usage personnel mono-poste ; a reconsiderer si l'infrastructure
+grandit significativement.
