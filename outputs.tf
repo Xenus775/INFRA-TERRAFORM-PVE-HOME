@@ -27,3 +27,15 @@ output "web01_ipv4_addresses" {
   description = "Adresses IPv4 rapportees par le qemu-guest-agent (VM en DHCP)"
   value       = module.web01.ipv4_addresses
 }
+
+output "portal01_vm_id" {
+  value = module.portal01.vm_id
+}
+
+output "portal01_vm_name" {
+  value = module.portal01.vm_name
+}
+
+output "portal01_ip_address" {
+  value = "192.168.10.121"
+}

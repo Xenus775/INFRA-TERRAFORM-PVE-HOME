@@ -188,6 +188,29 @@ module "mon_service" {
 }
 ```
 
+## VM generees automatiquement (portail de provisioning on-demand)
+
+Le portail `CODE-PLATFORME-PROVISIONING-ONDEMDAND` (execute sur `portal01`)
+cree des VM a la demande en ecrivant un fichier `generated.<vm>.tf` **a la
+racine de ce depot** (pas dans un sous-dossier — Terraform ne charge
+automatiquement que les `.tf` du dossier racine, un sous-dossier
+necessiterait un `module` imbrique inutile). Chaque fichier reutilise
+`./modules/vm` exactement comme les blocs ci-dessus, ecrits par le
+portail (VMID alloue automatiquement : le plus petit libre entre 200 et
+299, en scannant `vm_id\s*=\s*(\d+)` sur tous les `.tf` du dossier racine).
+Ces fichiers sont commit/push comme le reste du depot (tracabilite), avec
+en commentaire l'horodatage et un avertissement "ne pas modifier a la
+main".
+
+**Important** : `portal01` execute Terraform avec son propre checkout et
+son propre `terraform.tfstate` (migre depuis le poste Windows lors du
+bootstrap de `portal01` — voir son role de deploiement). A partir de ce
+moment-la, **`terraform apply` ne doit plus etre lance depuis le poste
+Windows** (risque de state divergent / corrompu si deux states locaux
+pretendent gerer la meme infra Proxmox). Le poste Windows garde son
+checkout pour editer et relire les `.tf`, mais l'`apply` se fait
+desormais uniquement depuis `portal01`.
+
 ## Outputs
 
 `terraform output -json` expose notamment `lpransible01_vm_id`,
@@ -228,6 +251,13 @@ README du depot Ansible pour le detail.
 - **Le clone echoue avec une erreur de VMID deja utilise** : verifiez que le
   VMID choisi est bien libre (`terraform plan` le signalera aussi si le state
   local sait deja qu'il est pris).
+- **`terraform plan`/`apply` tres lent (plusieurs minutes, voire 15+)** :
+  le provider `bpg/proxmox` interroge l'agent QEMU de chaque VM existante
+  au refresh, et cet agent peut mettre tres longtemps a repondre (observe
+  plusieurs fois sur ce Proxmox). Pour un ajout/retrait cible qui n'a pas
+  besoin d'un etat parfaitement a jour des VM existantes, ajoutez
+  `-refresh=false` : le plan redevient quasi instantane. Faites un `plan`
+  normal (avec refresh) de temps en temps pour detecter une derive reelle.
 
 ## Bonnes pratiques / workflow recommande
 
