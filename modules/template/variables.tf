@@ -15,6 +15,12 @@ variable "name" {
   default     = "debian-13-cloudinit"
 }
 
+variable "pool_id" {
+  type        = string
+  description = "Pool Proxmox auquel rattacher le template"
+  default     = null
+}
+
 variable "storage_import" {
   type        = string
   description = "Storage utilise pour importer l'image cloud (content-type: import)"
@@ -40,10 +46,4 @@ variable "cloud_image_filename" {
   type        = string
   description = "Nom de fichier local de l'image cloud une fois telechargee"
   default     = "debian-13-generic-amd64.qcow2"
-}
-
-variable "disk_size_gb" {
-  type        = number
-  description = "Taille du disque du template en Go"
-  default     = 20
 }

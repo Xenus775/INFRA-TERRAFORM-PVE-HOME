@@ -80,16 +80,12 @@ OPTIONS
 
 Option A : Construction manuelle via SSH root sur l'hote Proxmox
   (wget de l'image cloud, qm importdisk, qm template). Rapide a executer une
-  fois, mais constitue une manipulation manuelle non documentee dans le code,
-  et necessite un acces SSH root que l'on cherche justement a eviter pour
-  Terraform.
+  fois, mais constitue une manipulation manuelle non documentee dans le code.
 
 Option B : Construction du template via Terraform (resource
-  proxmox_virtual_environment_download_file + proxmox_virtual_environment_vm
-  avec template = true)
-  Entierement reproductible depuis "terraform apply", aucun acces SSH root
-  necessaire, le template devient une ressource versionnee au meme titre que
-  les VM qui en decoulent.
+  proxmox_download_file + proxmox_virtual_environment_vm avec template = true)
+  Entierement reproductible depuis "terraform apply", le template devient une
+  ressource versionnee au meme titre que les VM qui en decoulent.
 
 DECISION
 --------
@@ -101,21 +97,153 @@ RAISON
 ------
 
 Coherent avec l'exigence de ne jamais dependre de manipulations manuelles non
-documentees. Le token API "provisioner" dedie a explicitement les droits
-Datastore.AllocateSpace / Datastore.AllocateTemplate necessaires sur les
-storages local et local-lvm, rendant cette approche possible sans acces SSH
-root a l'hote.
+documentees, meme si (voir decision suivante) un acces SSH au noeud s'est
+finalement revele necessaire pour une partie de cette etape.
 
 IMPACT
 ------
 
-Positif : reproductibilite totale, aucun secret SSH root necessaire pour
-Terraform.
+Positif : reproductibilite totale, "terraform apply" recree le template a
+l'identique en cas de perte.
 Negatif : le premier apply est plus long (telechargement de l'image cloud
 depuis internet a chaque recreation du template si celui-ci est detruit).
 
 ALTERNATIVES REJETEES
 ---------------------
+
+Option A (bootstrap manuel scripte) a ete reconsideree en cours de route
+lorsque la limitation ci-dessous a ete decouverte, et de nouveau ecartee au
+profit d'un acces SSH dedie pour Terraform (voir decision suivante) : garder
+la creation du template dans Terraform reste plus coherent avec l'objectif de
+recreer l'infrastructure a l'identique depuis le seul code versionne.
+
+
+==================================================
+DECISION : Acces SSH de Terraform au noeud Proxmox (limitation decouverte en pratique)
+==================================================
+
+CONTEXTE
+--------
+
+La decision precedente supposait qu'aucun acces SSH root a l'hote Proxmox ne
+serait necessaire, le token API "provisioner" ayant les droits
+Datastore.AllocateSpace / Datastore.AllocateTemplate. En pratique, lors du
+premier "terraform apply" reel, la creation du disque du template a echoue
+avec l'erreur :
+
+  "creating custom disk: unable to authenticate user "" over SSH to
+  192.168.10.160:22"
+
+Il s'agit d'une limitation connue et documentee du provider bpg/proxmox : la
+creation d'un disque de VM a partir d'un fichier importe (content-type
+"import") passe par une connexion SSH du provider vers le noeud, l'API
+Proxmox seule ne l'exposant pas completement. Ce n'est pas lie a un probleme
+de taille de disque ni de permissions API.
+
+OPTIONS
+-------
+
+Option A : Accorder a Terraform une cle SSH dediee vers le noeud Proxmox
+  (bloc "ssh" du provider). Terraform reste totalement autonome : un simple
+  "terraform apply" recree tout, y compris le template, sans intervention
+  manuelle.
+
+Option B : Revenir a un bootstrap manuel scripte, une seule fois, pour la
+  creation du template uniquement ; Terraform ne gererait plus que les clones.
+  Reduit la surface d'acces permanente mais reintroduit une etape hors
+  "terraform apply" (meme documentee et scriptee).
+
+DECISION
+--------
+
+Option A : une paire de cles SSH dediee ("id_ed25519_pve_host_terraform"),
+distincte de la cle Cloud-Init injectee dans les VM, est utilisee uniquement
+par le provider Terraform (bloc "ssh" dans providers.tf, variables
+pve_ssh_username et pve_ssh_private_key_path). La cle publique a ete ajoutee
+manuellement une fois au authorized_keys de root sur l'hote Proxmox (seule
+manipulation manuelle du processus, documentee ici et dans le README).
+
+RAISON
+------
+
+Coherent avec la priorite donnee a la reproductibilite complete depuis le
+code : mieux vaut un acces SSH root scope a une cle dediee et documente, qu'un
+processus de bootstrap manuel qui devrait etre re-execute (et donc re-explique
+et re-documente) a chaque perte du template.
+
+IMPACT
+------
+
+Positif : "terraform apply" seul suffit pour recreer integralement le
+template et les VM, y compris apres une perte totale.
+Negatif : Terraform detient desormais une cle SSH root sur l'hyperviseur
+lui-meme, ce qui est un acces plus sensible que le token API scope. Cette cle
+est dediee (jamais reutilisee ailleurs), stockee uniquement en local, jamais
+commitee (voir .gitignore et la decision sur la gestion des secrets).
+
+ALTERNATIVES REJETEES
+---------------------
+
+Option B a ete ecartee : elle aurait laisse la reconstruction du template
+dependante d'une action manuelle (meme scriptee), ce qui contredit l'objectif
+central de ce depot (tout recreer depuis "terraform apply").
+
+
+==================================================
+DECISION : Permissions Proxmox additionnelles decouvertes en pratique
+==================================================
+
+CONTEXTE
+--------
+
+Au-dela des permissions initialement prevues (PVEVMAdmin/PVEAdmin sur
+/pool/IAC, PVEDatastoreAdmin sur /storage/local et /storage/local-lvm), deux
+verifications de permission supplementaires, propres a Proxmox VE 9 et non
+anticipees lors de l'audit initial, ont bloque le premier apply :
+
+1. L'API "download-url" (utilisee pour importer l'image cloud) exige les
+   privileges Sys.Audit et Sys.Modify sur le chemin racine "/" specifiquement
+   (verification volontairement large cote Proxmox, pour eviter qu'un token
+   scope puisse transformer l'API en proxy pour sonder le reseau interne).
+2. Depuis Proxmox VE 9, chaque bridge reseau classique est automatiquement
+   expose comme une zone SDN implicite ("localnetwork"). Attacher une VM a ce
+   bridge necessite le privilege SDN.Use sur le chemin
+   /sdn/zones/localnetwork/vmbr0.
+
+DECISION
+--------
+
+- Role personnalise "SysModifyOnly" (uniquement Sys.Audit + Sys.Modify),
+  attribue a terraform_provisioner@pve sur le chemin "/".
+- Role integre "PVESDNUser" (uniquement SDN.Use), attribue sur le chemin
+  /sdn/zones/localnetwork/vmbr0.
+
+RAISON
+------
+
+Dans les deux cas, un role personnalise ou integre minimal a ete choisi
+plutot que d'elargir le role deja large "PVEAdmin" a ces chemins, afin de ne
+jamais accorder plus que les privileges precis requis par ces deux
+verifications.
+
+IMPACT
+------
+
+Positif : le token provisioner reste sans droit de gestion des utilisateurs,
+des permissions, ou des VM/CT en dehors du pool IAC, malgre ces deux ajouts.
+Negatif : Sys.Modify sur "/" reste, par nature, un privilege systeme large (il
+permet de modifier la configuration systeme du noeud : reseau, stockage,
+sauvegardes, etc.), meme s'il n'inclut pas la gestion des utilisateurs ni des
+VM hors du pool IAC. C'est un compromis assume pour permettre l'import
+d'image cloud via l'API plutot que via SSH.
+
+ALTERNATIVES REJETEES
+---------------------
+
+Attribuer PVEAdmin sur "/" au token provisioner aurait aussi resolu ces deux
+blocages, mais aurait donne au token un controle total sur l'ensemble du
+cluster (y compris les VM/CT geres manuellement) ; ecarte au profit des deux
+roles minimaux ci-dessus.
 
 La construction manuelle (Option A) a ete ecartee : elle aurait cree une
 dependance cachee non versionnee (le template existerait sur Proxmox sans

@@ -11,6 +11,7 @@ resource "proxmox_virtual_environment_vm" "template" {
   name      = var.name
   node_name = var.proxmox_node
   vm_id     = var.vm_id
+  pool_id   = var.pool_id
   template  = true
 
   cpu {
@@ -34,7 +35,10 @@ resource "proxmox_virtual_environment_vm" "template" {
     datastore_id = var.storage_vm
     file_id      = proxmox_download_file.cloud_image.id
     interface    = "scsi0"
-    size         = var.disk_size_gb
+    # Pas de "size" ici : on garde la taille native de l'image cloud pour eviter
+    # un redimensionnement a l'import, qui necessiterait un acces SSH au noeud
+    # Proxmox (limitation connue du provider bpg/proxmox). Chaque clone (module
+    # vm) redimensionne son propre disque via l'API, sans avoir ce probleme.
   }
 
   initialization {

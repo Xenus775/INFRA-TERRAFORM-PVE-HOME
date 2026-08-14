@@ -5,6 +5,7 @@ module "template" {
   storage_import = var.storage_template
   storage_vm     = var.storage_vm
   network_bridge = var.network_bridge
+  pool_id        = var.iac_pool_id
 }
 
 # VM d'administration : control-node Ansible.

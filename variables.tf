@@ -21,6 +21,17 @@ variable "proxmox_tls_insecure" {
   default     = true
 }
 
+variable "pve_ssh_username" {
+  type        = string
+  description = "Utilisateur SSH sur l'hote Proxmox (necessaire uniquement pour l'import du disque du template)"
+  default     = "root"
+}
+
+variable "pve_ssh_private_key_path" {
+  type        = string
+  description = "Chemin local vers la cle privee SSH dediee a l'acces au noeud Proxmox"
+}
+
 variable "proxmox_node" {
   type        = string
   description = "Nom du noeud Proxmox cible"

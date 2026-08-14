@@ -37,6 +37,10 @@ jamais entrer en collision avec les VM/CT existants geres manuellement
 - Un token API Proxmox dedie au provisioning (voir section "Authentification")
 - Une paire de cles SSH dediee, dont la cle publique sera injectee via
   Cloud-Init dans chaque VM
+- Une seconde paire de cles SSH dediee, dont la cle publique doit etre ajoutee
+  au `authorized_keys` de root sur l'hote Proxmox (voir section
+  "Authentification" — necessaire uniquement pour l'import du disque du
+  template, limitation du provider, voir `DECISIONS.txt`)
 
 ## Provider utilise
 
@@ -45,21 +49,59 @@ Raisons du choix detaillees dans `DECISIONS.txt`.
 
 ## Authentification Proxmox
 
-Ce depot n'utilise **jamais** de compte root. Deux tokens dedies existent :
+L'authentification API n'utilise **jamais** de compte root. Deux tokens
+dedies existent :
 
 | Token | Role | Usage |
 |---|---|---|
 | `terraform_auditor@pve!auditor` | PVEAuditor (lecture seule) sur `/` | Audit uniquement, non utilise par ce code Terraform |
-| `terraform_provisioner@pve!provisioner` | PVEAdmin sur `/pool/IAC`, PVEDatastoreAdmin sur `/storage/local` et `/storage/local-lvm` | Utilise par Terraform |
+| `terraform_provisioner@pve!provisioner` | voir tableau de permissions ci-dessous | Utilise par Terraform |
+
+Permissions du token `provisioner` (principe de moindre privilege, voir
+`DECISIONS.txt` pour le detail de chaque decision) :
+
+| Path | Role | Pourquoi |
+|---|---|---|
+| `/pool/IAC` | `PVEAdmin` | Creer/gerer les VM du pool dedie a l'IaC |
+| `/storage/local` | `PVEDatastoreAdmin` | Importer l'image cloud |
+| `/storage/local-lvm` | `PVEDatastoreAdmin` | Allouer les disques des VM |
+| `/nodes/PVE-INFRA-MATT-01` | `PVEAdmin` | Operations de creation de VM sur ce noeud |
+| `/` | `SysModifyOnly` (role custom : Sys.Audit + Sys.Modify uniquement) | Requis par l'API `download-url` (protection anti-SSRF cote Proxmox) |
+| `/sdn/zones/localnetwork/vmbr0` | `PVESDNUser` | Requis depuis PVE 9 pour attacher une VM au bridge (SDN implicite) |
 
 Pour recreer ce token si besoin, dans l'UI Proxmox :
 
 1. *Datacenter -> Permissions -> Pools -> Add* -> ID `IAC`
 2. *Datacenter -> Permissions -> Users -> Add* -> `terraform_provisioner@pve`
-3. *Datacenter -> Permissions -> Add* -> Path `/pool/IAC`, role `PVEVMAdmin` (ou `PVEAdmin`), Propagate
+3. *Datacenter -> Permissions -> Add* -> Path `/pool/IAC`, role `PVEAdmin`, Propagate
 4. *Datacenter -> Permissions -> Add* -> Path `/storage/local`, role `PVEDatastoreAdmin`, Propagate
 5. *Datacenter -> Permissions -> Add* -> Path `/storage/local-lvm`, role `PVEDatastoreAdmin`, Propagate
-6. *Datacenter -> Permissions -> API Tokens -> Add* -> user ci-dessus, Token ID `provisioner`, decocher "Privilege Separation"
+6. *Datacenter -> Permissions -> Add* -> Path `/nodes/PVE-INFRA-MATT-01`, role `PVEAdmin`, Propagate
+7. *Datacenter -> Permissions -> Roles -> Add* -> Role ID `SysModifyOnly`, cocher uniquement `Sys.Audit` et `Sys.Modify`
+8. *Datacenter -> Permissions -> Add* -> Path `/`, role `SysModifyOnly`, Propagate
+9. *Datacenter -> Permissions -> Add* -> Path `/sdn/zones/localnetwork/vmbr0`, role `PVESDNUser`, Propagate
+10. *Datacenter -> Permissions -> API Tokens -> Add* -> user ci-dessus, Token ID `provisioner`, decocher "Privilege Separation"
+
+### Acces SSH au noeud (Terraform uniquement)
+
+Le provider `bpg/proxmox` a besoin d'un acces SSH au noeud Proxmox pour
+finaliser la creation du disque du template a partir de l'image importee
+(limitation du provider, pas contournable — voir `DECISIONS.txt`). Une paire
+de cles dediee est utilisee, distincte de la cle Cloud-Init :
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_pve_host_terraform -C "terraform-pve-host-ssh"
+```
+
+Ajoutez la cle publique au `authorized_keys` de root sur l'hote, via le Shell
+web Proxmox (*Datacenter -> Noeud -> Shell*) :
+
+```bash
+echo "<cle-publique>" >> /root/.ssh/authorized_keys
+```
+
+Renseignez ensuite `pve_ssh_username` et `pve_ssh_private_key_path` dans
+`terraform.tfvars`.
 
 ## Gestion des secrets
 
@@ -90,6 +132,8 @@ Variables principales (voir `variables.tf` pour la liste complete) :
 | `proxmox_api_token_id` | Token ID (`user@realm!tokenid`) | - (obligatoire) |
 | `proxmox_api_token_secret` | Secret du token | - (obligatoire, sensible) |
 | `ssh_public_key` | Cle publique SSH injectee via Cloud-Init | - (obligatoire) |
+| `pve_ssh_private_key_path` | Chemin local vers la cle privee SSH dediee au noeud Proxmox | - (obligatoire) |
+| `pve_ssh_username` | Utilisateur SSH sur l'hote Proxmox | `root` |
 | `proxmox_node` | Noeud Proxmox cible | `PVE-INFRA-MATT-01` |
 | `network_bridge` | Bridge reseau | `vmbr0` |
 | `storage_vm` | Storage des disques VM | `local-lvm` |

@@ -8,3 +8,10 @@ proxmox_node = "PVE-INFRA-MATT-01"
 
 # Cle publique du keypair dedie injecte via Cloud-Init (ne jamais mettre la cle privee ici)
 ssh_public_key = "ssh-ed25519 AAAA... commentaire"
+
+# SSH vers le noeud Proxmox lui-meme, necessaire uniquement pour l'import du
+# disque du template (limitation de l'API, voir DECISIONS.txt). Cle dediee,
+# distincte de ssh_public_key ci-dessus. Le chemin pointe vers un fichier
+# LOCAL, jamais commite.
+pve_ssh_username         = "root"
+pve_ssh_private_key_path = "~/.ssh/id_ed25519_pve_host_terraform"
