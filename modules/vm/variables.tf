@@ -31,7 +31,11 @@ variable "cpu_cores" {
 
 variable "memory_mb" {
   type    = number
-  default = 2048
+  # 4096 par defaut (pas 2048) : une VM sous-provisionnee en RAM a rendu
+  # l'agent QEMU tres lent a repondre pendant le boot/cloud-init sur
+  # plusieurs VM cette session (LPRANSIBLE01, web01, portal01, demo01,
+  # toutes a 2048 Mo).
+  default = 4096
 }
 
 variable "disk_size_gb" {
