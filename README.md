@@ -212,9 +212,11 @@ un script explicite fait le lien, a executer manuellement apres chaque
 
 Le script commit/push le depot Ansible si necessaire, declenche le
 playbook `exploitation-account.yml` sur LPRANSIBLE01 (`--limit <VmName>`),
-et affiche le mot de passe genere a la fin de son execution. Ce mot de
-passe n'est utilisable qu'en local (console Proxmox / `su`), jamais en SSH
-— voir le README du depot Ansible.
+et affiche le mot de passe genere a la fin de son execution. Sur les VM
+d'administration (groupe `control_node`), ce mot de passe n'est utilisable
+qu'en local (console Proxmox / `su`) ; sur toute autre VM, il est aussi
+utilisable en SSH pour le compte `exploitation` uniquement — voir le
+README du depot Ansible pour le detail.
 
 ## Troubleshooting
 
