@@ -74,7 +74,10 @@ module "portal01" {
   pool_id        = var.iac_pool_id
 
   cpu_cores    = 2
-  memory_mb    = 2048
+  # 8192 (pas 2048) : cette VM execute elle-meme Terraform (apply +
+  # attente agent QEMU) en continu pour le portail, une RAM trop juste
+  # aggrave la lenteur deja observee de l'agent QEMU sur les autres VM.
+  memory_mb    = 8192
   disk_size_gb = 20
   storage      = var.storage_vm
 
