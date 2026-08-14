@@ -33,3 +33,28 @@ module "lpransible01" {
 
   tags = ["iac", "control-node", "ansible"]
 }
+
+# VM de service : serveur web (Apache), configuree par le role/playbook
+# webserver.yml du depot Ansible (groupe d'inventaire "webservers").
+module "web01" {
+  source = "./modules/vm"
+
+  proxmox_node   = var.proxmox_node
+  vm_name        = "web01"
+  vm_id          = 201
+  template_vm_id = module.template.vm_id
+  pool_id        = var.iac_pool_id
+
+  cpu_cores    = 2
+  memory_mb    = 2048
+  disk_size_gb = 20
+  storage      = var.storage_vm
+
+  network_bridge = var.network_bridge
+  # dhcp par defaut : VM de service, pas d'IP fixe requise.
+
+  ci_user        = var.ci_user
+  ssh_public_key = var.ssh_public_key
+
+  tags = ["iac", "webserver"]
+}

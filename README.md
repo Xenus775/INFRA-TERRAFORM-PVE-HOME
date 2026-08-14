@@ -195,6 +195,27 @@ module "mon_service" {
 `scripts/generate-inventory.ps1` s'appuie sur ces outputs pour generer
 l'inventaire consomme par Ansible.
 
+## Compte d'exploitation automatique sur les nouvelles VM
+
+A chaque nouvelle VM Linux provisionnee par ce depot, un compte local
+`exploitation` (sudo, mot de passe genere aleatoirement) doit etre cree
+via le role Ansible `exploitation_account`. Ce depot Terraform ne declenche
+pas Ansible lui-meme (separation des responsabilites, voir DECISIONS.txt) :
+un script explicite fait le lien, a executer manuellement apres chaque
+`terraform apply` ayant cree une VM :
+
+```powershell
+# 1. Ajoutez la VM dans inventories/home/hosts.yml (depot Ansible), groupe approprie
+# 2. Puis :
+.\scripts\provision-vm.ps1 -VmName web01
+```
+
+Le script commit/push le depot Ansible si necessaire, declenche le
+playbook `exploitation-account.yml` sur LPRANSIBLE01 (`--limit <VmName>`),
+et affiche le mot de passe genere a la fin de son execution. Ce mot de
+passe n'est utilisable qu'en local (console Proxmox / `su`), jamais en SSH
+— voir le README du depot Ansible.
+
 ## Troubleshooting
 
 - **`401`/`403` de l'API Proxmox** : verifiez que le token n'a pas expire et
