@@ -19,8 +19,11 @@ module "lpransible01" {
   template_vm_id = module.template.vm_id
   pool_id        = var.iac_pool_id
 
-  cpu_cores    = 2
-  memory_mb    = 2048
+  # 4 vCPU / 8192 Mo (pas 2/2048) : control-node Ansible, execute
+  # plusieurs ansible-playbook en parallele desormais (portail de
+  # provisioning on-demand).
+  cpu_cores    = 4
+  memory_mb    = 8192
   disk_size_gb = 20
   storage      = var.storage_vm
 
